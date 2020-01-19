@@ -2,7 +2,7 @@
 
 import torch.nn as nn
 from collections import OrderedDict
-from master_libs.networks.shufflenetv2 import ShuffleNetV2
+#from master_libs.networks.shufflenetv2 import ShuffleNetV2
 import torch
 
 class GetGraphConfig(object):
@@ -16,7 +16,12 @@ class GetGraphConfig(object):
         self.map_layer_addr2info = OrderedDict()
         self.layers_name = []
 
+        ######### add dict for pooling #############
+        self.map_layer_pooling = OrderedDict()
+        ############################################
+
         self.layer_counter = 0  # count the layer number when calling hook
+        self.layer_pooling = 1
         # self.layer_dict = {'Conv2d': 'Convolution',
         #       'ReLU': 'ReLU',
         #       'MaxPool2d': 'Pooling',
@@ -142,6 +147,7 @@ class GetGraphConfig(object):
         attrs['training'] = module.training
         attrs['num_features'] = module.num_features
         attrs['running_mean'] = module.running_mean
+        # print(module.running_var, attrs['running_mean'])
         attrs['running_var'] = module.running_var
         attrs['num_batches_tracked'] = module.num_batches_tracked
         return attrs
@@ -153,8 +159,8 @@ class GetGraphConfig(object):
         attrs['training'] = module.training
         if isinstance(module, nn.ReLU):
             attrs['inplace'] = module.inplace
-            attrs['threshold'] = module.threshold
-            attrs['value'] = module.value
+            # attrs['threshold'] = module.threshold
+            # attrs['value'] = module.value
         elif isinstance(module, nn.ReLU6):
             attrs['inplace'] = module.inplace
             attrs['max_val'] = module.max_val
@@ -218,11 +224,16 @@ class GetGraphConfig(object):
         #         input[0]._cdata,
         #         output[0]._cdata]
 
+        #print(module.__class__.__name__, input[0].grad_fn, output[0].grad_fn)
         attr = self.get_layer_attr(module)
         if hasattr(module, 'weight'):
             self.map_layer_addr2info[module.weight._cdata] = attr
         else:
-            self.map_layer_addr2info[attr['class']+'_'+str(self.layer_counter)] = attr
+            if attr['class'] != 'MaxPool2d':
+                self.map_layer_addr2info[attr['class']+'_'+str(self.layer_counter)] = attr
+            else:
+                self.map_layer_pooling[attr['class']+'_'+str(self.layer_pooling)] = attr
+                self.layer_pooling += 1
         # attr['addr'] = [input[0]._cdata, output[0]._cdata]
         #
         # print('----------hook called:{}'.format(self.layer_counter), self.layers_name[self.layer_counter])
@@ -263,6 +274,9 @@ class GetGraphConfig(object):
         self.register_hook(model)
         self.layer_counter = 0
         output = model(input)
+        # cr = nn.CrossEntropyLoss()
+        # loss = cr(output.view(-1,2), torch.zeros(*output.size()).view(-1, 2)[:, 0].long())
+        # loss.backward(retain_graph=True)
         # output.view()
         return input, output
 
@@ -272,5 +286,4 @@ if __name__ == '__main__':
     mbnetv2 = torchvision.models.resnet18(pretrained=False)
     inputs = torch.randn(1, 3, 224, 224)
     pytorch2_caffe = GetGraphConfig()
-    pytorch2_caffe.traverse_model(mbnetv2, inputs)
-
+    print(pytorch2_caffe.traverse_model(mbnetv2, inputs))
